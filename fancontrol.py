@@ -25,7 +25,7 @@ MAX_SES_RESULT_LEN = 32768
 MAX_FANS = 6
 FAN_SPEED_LEVELS = list(range(1, 8))
 
-def sg_ses(*args, **kwargs):
+def sg_ses(*args, error_is_fatal=True, **kwargs):
     cmd = ['sg_ses', '--maxlen={:d}'.format(MAX_SES_RESULT_LEN)] + list(args)
     run_args = {
         'stdout': subprocess.PIPE,
@@ -36,7 +36,17 @@ def sg_ses(*args, **kwargs):
     run_args.update(kwargs)
 
     log.debug('# %s', ' '.join(shlex.quote(t) for t in cmd))
-    return subprocess.run(cmd, **run_args)
+    try:
+        result = subprocess.run(cmd, **run_args)
+    except subprocess.CalledProcessError as err:
+        log.debug('Command returned non-zero exitcode: %s', err.returncode)
+        log.debug('Command STDOUT: %s', err.stdout)
+        log.debug('Command STDERR: %s', err.stderr)
+        if error_is_fatal:
+            raise err
+        else:
+            return None
+    return result
 
 def get_sa120_devices(device_patterns):
     invert_dict = lambda d: {v: k for k, v in d.items()}
