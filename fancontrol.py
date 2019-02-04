@@ -40,8 +40,8 @@ def sg_ses(*args, error_is_fatal=True, **kwargs):
         result = subprocess.run(cmd, **run_args)
     except subprocess.CalledProcessError as err:
         log.debug('Command returned non-zero exitcode: %s', err.returncode)
-        log.debug('Command STDOUT: %s', err.stdout)
-        log.debug('Command STDERR: %s', err.stderr)
+        log.debug('Command STDOUT: %s', err.stdout.decode('utf-8'))
+        log.debug('Command STDERR: %s', err.stderr.decode('utf-8'))
         if error_is_fatal:
             raise err
         else:
