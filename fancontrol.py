@@ -23,7 +23,7 @@ MAX_SES_RESULT_LEN = 32768
 MAX_FANS = 6
 
 def sg_ses(*args, **kwargs):
-    cmd = ['sg_ses', '--maxlen={:d}'.format(MAX_SES_RESULT_LEN)] + args
+    cmd = ['sg_ses', '--maxlen={:d}'.format(MAX_SES_RESULT_LEN)] + list(args)
     run_args = {
         'stdout': subprocess.PIPE,
         'stderr': subprocess.DEVNULL,
@@ -42,7 +42,7 @@ def get_sa120_devices(device_patterns):
     unique_devices = invert_dict(invert_dict({dev_path: get_device_id(dev_path) 
         for dev_path in extant_devices}))
 
-    log.debug('Found existing devices: %s', ', '.join(unique_devices.keys()))
+    log.debug('Found existing devices: %s', ' '.join(unique_devices.keys()))
 
     for dev_path, dev_id in unique_devices.items():
         log.info('Checking device: %s (%s)', dev_path, dev_id)
@@ -79,11 +79,11 @@ def set_fan_speeds(device_path, speed):
         fan_data[idx + 3] = u'{:x}'.format(1 << 5 | speed & 7).encode('utf-8')
 
     cmd_input = io.BytesIO()
-    for offset in range(0, len(fan_data)):
+    for offset in range(len(fan_data)):
         cmd_input.write(fan_data[offset])
-        if offset > 0 and offset % 16 == 0:
+        if (offset + 1) % 16 == 0:
             cmd_input.write(b'\n')
-        elif offset > 0 and offset % 8 == 0:
+        elif (offset + 1) % 8 == 0:
             cmd_input.write(b'  ')
         else:
             cmd_input.write(b' ')
@@ -103,7 +103,7 @@ def main(args):
 
         if args.set_speed:
             log.info('Setting fan speed to: %d RPM', args.set_speed)
-            set_fan_speeds(device_path, args.set_speed)
+            set_fan_speeds(dev_path, args.set_speed)
 
 if __name__ == '__main__':
     import argparse
