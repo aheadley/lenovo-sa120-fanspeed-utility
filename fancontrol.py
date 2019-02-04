@@ -30,11 +30,12 @@ def sg_ses(*args, **kwargs):
     run_args = {
         'stdout': subprocess.PIPE,
         'stderr': subprocess.DEVNULL,
+        'stdin': subprocess.DEVNULL,
         'check': True,
     }
     run_args.update(kwargs)
 
-    log.debug('Running command: %s', ' '.join(shlex.quote(t) for t in cmd))
+    log.debug('# %s', ' '.join(shlex.quote(t) for t in cmd))
     return subprocess.run(cmd, **run_args)
 
 def get_sa120_devices(device_patterns):
@@ -94,6 +95,8 @@ def set_fan_speeds(device_path, speed):
             cmd_input.write(b' ')
     cmd_input.write(b'\n')
 
+    log.debug('cmd_input data: \n%s', cmd_input.getvalue().decode('utf-8'))
+
     proc = sg_ses(device_path, '-p', '0x2', '--control', '--data', '-',
         stdin=subprocess.PIPE)
     out = proc.communicate(input=cmd_input.getvalue())[0].decode('utf-8')
@@ -125,6 +128,20 @@ if __name__ == '__main__':
         help='Extra paths to search for enclosures',
         metavar='DEVICE', nargs='*',
     )
+    parser.add_argument('-v', '--verbose',
+        help='Log more messages',
+        action='count', default=0,
+    )
+    parser.add_argument('-q', '--quiet',
+        help='Log fewer messages',
+        action='count', default=0,
+    )
     args = parser.parse_args()
+
+    log.setLevel(
+        min(logging.CRITICAL, max(logging.DEBUG,
+            logging.INFO + (args.quiet * 10) - (args.verbose * 10)
+        ))
+    )
 
     main(args)
