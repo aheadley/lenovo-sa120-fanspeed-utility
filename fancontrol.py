@@ -9,9 +9,11 @@ import os
 import shlex
 import stat
 import subprocess
+import sys
 
-logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger('fancontrol')
+log.addHandler(logging.StreamHandler(sys.stdout))
+log.setLevel(logging.DEBUG)
 
 DEFAULT_DEVICE_PATTERNS = [
     '/dev/sg*',
@@ -21,6 +23,7 @@ DEFAULT_DEVICE_PATTERNS = [
 # sg_ses uses a default of 65532, but not everything supports that
 MAX_SES_RESULT_LEN = 32768
 MAX_FANS = 6
+FAN_SPEED_LEVELS = list(range(1, 8))
 
 def sg_ses(*args, **kwargs):
     cmd = ['sg_ses', '--maxlen={:d}'.format(MAX_SES_RESULT_LEN)] + list(args)
@@ -42,8 +45,6 @@ def get_sa120_devices(device_patterns):
     unique_devices = invert_dict(invert_dict({dev_path: get_device_id(dev_path) 
         for dev_path in extant_devices}))
 
-    log.debug('Found existing devices: %s', ' '.join(unique_devices.keys()))
-
     for dev_path, dev_id in unique_devices.items():
         log.info('Checking device: %s (%s)', dev_path, dev_id)
         try:
@@ -54,8 +55,9 @@ def get_sa120_devices(device_patterns):
 
         if out.strip():
             enc_name = out.splitlines()[0].strip()
-            log.info('Found enclosure on %s: %s', dev_path, enc_name)
+            log.debug('Found enclosure on %s: %s', dev_path, enc_name)
             if 'ThinkServerSA120' in enc_name:
+                log.info('Found a SA120 at: %s', dev_path)
                 yield dev_path
 
 def get_device_id(device_path):
@@ -69,6 +71,9 @@ def get_fan_speeds(device_path):
     return [get_fan_speed(device_path, i) for i in range(0, MAX_FANS)]
 
 def set_fan_speeds(device_path, speed):
+    if speed not in FAN_SPEED_LEVELS:
+        raise ValueError('Invalid fan speed level: %d' % speed)
+
     fan_data = sg_ses(device_path, '-p', '0x2', '--raw').stdout.split()
 
     for fan_idx in range(0, MAX_FANS):
@@ -102,19 +107,22 @@ def main(args):
             log.info('Fan #%d: %d RPM', fan_idx, fan_speed)
 
         if args.set_speed:
-            log.info('Setting fan speed to: %d RPM', args.set_speed)
+            log.info('Setting fan speed level: %d', args.set_speed)
             set_fan_speeds(dev_path, args.set_speed)
+    else:
+        log.warning('No enclosures found!')
 
 if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', '--set-speed',
-        help='Set the fan speed',
-        type=int,
+        help='Set the fan speed level',
+        type=int, default=None,
+        choices=FAN_SPEED_LEVELS,
     )
     parser.add_argument('devices',
-        help='Extra paths to search for enclosure',
+        help='Extra paths to search for enclosures',
         metavar='DEVICE', nargs='*',
     )
     args = parser.parse_args()
