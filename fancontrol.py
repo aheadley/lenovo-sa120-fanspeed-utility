@@ -1,127 +1,122 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf8 -*-
 
-import os
-import sys
-import time
 import glob
+import io
+import itertools
+import logging
+import os
+import shlex
 import stat
+import subprocess
 
-from io import BytesIO
-from subprocess import check_output, Popen, PIPE, STDOUT, CalledProcessError
+logging.basicConfig(level=logging.DEBUG)
+log = logging.getLogger('fancontrol')
 
-devices_to_check = ['/dev/sg*', '/dev/ses*', '/dev/bsg/*']
+DEFAULT_DEVICE_PATTERNS = [
+    '/dev/sg*',
+    '/dev/ses*',
+    '/dev/bsg/*',
+]
+# sg_ses uses a default of 65532, but not everything supports that
+MAX_SES_RESULT_LEN = 32768
+MAX_FANS = 6
 
+def sg_ses(*args, **kwargs):
+    cmd = ['sg_ses', '--maxlen={:d}'.format(MAX_SES_RESULT_LEN)] + args
+    run_args = {
+        'stdout': subprocess.PIPE,
+        'stderr': subprocess.DEVNULL,
+        'check': True,
+    }
+    run_args.update(kwargs)
 
-def usage():
-    print('python fancontrol.py 1-7')
-    sys.exit(-1)
+    log.debug('Running command: %s', ' '.join(shlex.quote(t) for t in cmd))
+    return subprocess.run(cmd, **run_args)
 
+def get_sa120_devices(device_patterns):
+    invert_dict = lambda d: {v: k for k, v in d.items()}
 
-def get_requested_fan_speed():
-    if len(sys.argv) < 2:
-        return usage()
-    try:
-        speed = int(sys.argv[1])
-    except ValueError:
-        return usage()
-    if not 1 <= speed <= 7:
-        return usage()
-    return speed
+    extant_devices = filter(lambda d: stat.S_ISCHR(os.stat(d).st_mode),
+        itertools.chain(*[glob.glob(device_glob) for device_glob in device_patterns]))
+    unique_devices = invert_dict(invert_dict({dev_path: get_device_id(dev_path) 
+        for dev_path in extant_devices}))
 
+    log.debug('Found existing devices: %s', ', '.join(unique_devices.keys()))
 
-def print_speeds(device):
-    for i in range(0, 6):
-        print('Fan {} speed: {}'.format(i, check_output(
-            ['sg_ses', '--maxlen=32768', '--index=coo,{}'.format(i), '--get=1:2:11', device])
-                                        .decode('utf-8').split('\n')[0]))
+    for dev_path, dev_id in unique_devices:
+        log.info('Checking device: %s (%s)', dev_path, dev_id)
+        try:
+            out = sg_ses(dev_path, '--status').stdout.decode('utf-8')
+        except subprocess.CalledProcessError as err:
+            log.debug(err)
+            continue
 
+        if out.strip():
+            enc_name = out.splitlines()[0].strip()
+            log.info('Found enclosure on %s: %s', dev_path, enc_name)
+            if 'ThinkServerSA120' in enc_name:
+                yield dev_path
 
-def find_sa120_devices():
-    devices = []
-    seen_devices = set()
-    for device_glob in devices_to_check:
-        for device in glob.glob(device_glob):
-            stats = os.stat(device)
-            if not stat.S_ISCHR(stats.st_mode):
-                print('Enclosure not found on ' + device)
-                continue
-            device_id = format_device_id(stats)
-            if device_id in seen_devices:
-                print('Enclosure already seen on ' + device)
-                continue
-            seen_devices.add(device_id)
-            try:
-                output = check_output(['sg_ses', '--maxlen=32768', device], stderr=STDOUT)
-                if b'ThinkServerSA120' in output:
-                    print('Enclosure found on ' + device)
-                    devices.append(device)
-                else:
-                    print('Enclosure not found on ' + device)
-            except CalledProcessError:
-                print('Enclosure not found on ' + device)
-    return devices
+def get_device_id(device_path):
+    dev_stat = os.stat(device_path)
+    return '{},{}'.format(os.major(dev_stat.st_rdev), os.minor(dev_stat.st_rdev))
 
+def get_fan_speed(device_path, fan_idx):
+    return int(sg_ses(device_path, '--index=coo,{:d}'.format(fan_idx), '--get=1:2:11').stdout.decode('utf-8'))
 
-def format_device_id(stats):
-    return '{},{}'.format(os.major(stats.st_rdev), os.minor(stats.st_rdev))
+def get_fan_speeds(device_path):
+    return [get_fan_speed(device_path, i) for i in range(0, MAX_FANS)]
 
+def set_fan_speeds(device_path, speed):
+    fan_data = sg_ses(device_path, '-p', '0x2', '--raw').stdout.split()
 
-def set_fan_speeds(device, speed):
-    print_speeds(device)
-    print('Reading current configuration...')
-    out = check_output(['sg_ses', '--maxlen=32768', '-p', '0x2', device, '--raw'])
+    for fan_idx in range(0, MAX_FANS):
+        idx = 88 + 4 * fan_idx
+        fan_data[idx + 0] = b'80'
+        fan_data[idx + 1] = b'00'
+        fan_data[idx + 2] = b'00'
+        fan_data[idx + 3] = u'{:x}'.format(1 << 5 | speed & 7).encode('utf-8')
 
-    s = out.split()
-
-    for i in range(0, 6):
-        print('Setting fan {} to {}'.format(i, speed))
-        idx = 88 + 4 * i
-        s[idx + 0] = b'80'
-        s[idx + 1] = b'00'
-        s[idx + 2] = b'00'
-        s[idx + 3] = u'{:x}'.format(1 << 5 | speed & 7).encode('utf-8')
-
-    output = BytesIO()
-    off = 0
-    count = 0
-
-    while True:
-        output.write(s[off])
-        off = off + 1
-        count = count + 1
-        if count == 8:
-            output.write(b'  ')
-        elif count == 16:
-            output.write(b'\n')
-            count = 0
+    cmd_input = io.BytesIO()
+    for offset in range(0, len(fan_data)):
+        cmd_input.write(fan_data[offset])
+        if offset > 0 and offset % 16 == 0:
+            cmd_input.write(b'\n')
+        elif offset > 0 and offset % 8 == 0:
+            cmd_input.write(b'  ')
         else:
-            output.write(b' ')
-        if off >= len(s):
-            break
+            cmd_input.write(b' ')
+    cmd_input.write(b'\n')
 
-    output.write(b'\n')
-    p = Popen(['sg_ses', '--maxlen=32768', '-p', '0x2', device, '--control', '--data', '-'],
-              stdout=PIPE, stdin=PIPE, stderr=PIPE)
-    print(p.communicate(input=output.getvalue())[0].decode('utf-8'))
-    print('Set fan speeds... Waiting to get fan speeds (ctrl+c to skip)')
-    try:
-        time.sleep(10)
-        print_speeds(device)
-    except KeyboardInterrupt:
-        pass
+    proc = sg_ses(device_path, '-p', '0x2', '--control', '--data', '-',
+        stdin=subprocess.PIPE)
+    out = proc.communicate(input=cmd_input.getvalue())[0].decode('utf-8')
+    log.debug('Fan control cmd output: %s', out)
 
+def main(args):
+    dev_patterns = DEFAULT_DEVICE_PATTERNS + args.devices
 
-def main():
-    speed = get_requested_fan_speed()
-    devices = find_sa120_devices()
-    if not devices:
-        print('Could not find enclosure')
-        sys.exit(1)
-    for device in devices:
-        set_fan_speeds(device, speed)
-    print('\nDone')
+    for dev_path in get_sa120_devices(dev_patterns):
+        for fan_idx, fan_speed in enumerate(get_fan_speeds(dev_path)):
+            log.info('Fan #%d: %d RPM', fan_idx, fan_speed)
 
+        if args.set_speed:
+            log.info('Setting fan speed to: %d RPM', args.set_speed)
+            set_fan_speeds(device_path, args.set_speed)
 
 if __name__ == '__main__':
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-s', '--set-speed',
+        help='Set the fan speed',
+        type=int,
+    )
+    parser.add_argument('devices',
+        help='Extra paths to search for enclosure',
+        metavar='DEVICE', nargs='*',
+    )
+    args = parser.parse_args()
+
+    main(args)
