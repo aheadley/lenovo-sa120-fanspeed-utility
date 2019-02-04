@@ -44,7 +44,7 @@ def get_sa120_devices(device_patterns):
 
     log.debug('Found existing devices: %s', ', '.join(unique_devices.keys()))
 
-    for dev_path, dev_id in unique_devices:
+    for dev_path, dev_id in unique_devices.items():
         log.info('Checking device: %s (%s)', dev_path, dev_id)
         try:
             out = sg_ses(dev_path, '--status').stdout.decode('utf-8')
