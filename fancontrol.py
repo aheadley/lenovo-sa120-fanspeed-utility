@@ -124,12 +124,13 @@ def main(args):
         sys.stdout.write(get_json_output(get_sa120_devices(dev_patterns)) + '\n')
     else:
         for dev_path in get_sa120_devices(dev_patterns):
-            for fan_idx, fan_speed in enumerate(get_fan_speeds(dev_path)):
-                log.info('Fan #%d: %d RPM', fan_idx, fan_speed)
-
             if args.set_speed:
                 log.info('Setting fan speed level: %d', args.set_speed)
                 set_fan_speeds(dev_path, args.set_speed)
+            else:
+                for fan_idx, fan_speed in enumerate(get_fan_speeds(dev_path)):
+                    log.info('Fan #%d: %d RPM', fan_idx, fan_speed)
+
 
 if __name__ == '__main__':
     import argparse
@@ -153,7 +154,7 @@ if __name__ == '__main__':
         action='count', default=0,
     )
     parser.add_argument('-j', '--json',
-        help='Write fan speeds as json to stdout',
+        help='Write fan speeds as json to stdout, overrides -s',
         action='store_true', default=False,
     )
     args = parser.parse_args()

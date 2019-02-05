@@ -43,6 +43,9 @@ optional arguments:
   -j, --json            Write fan speeds as json to stdout
 ~~~~
 
+**NOTE** Most output is sent to *stderr*, except for the JSON from `-j` which is
+output on *stdout*.
+
 ## Examples
 
 ~~~~
@@ -60,12 +63,6 @@ Fan #5: 954 RPM
 # ./fancontrol.py -s 2
 Checking device: /dev/ses0 (0,169)
 Found a SA120 at: /dev/ses0
-Fan #0: 833 RPM
-Fan #1: 944 RPM
-Fan #2: 937 RPM
-Fan #3: 0 RPM
-Fan #4: 939 RPM
-Fan #5: 954 RPM
 Setting fan speed level: 2
 ~~~~
 ~~~~
@@ -73,5 +70,5 @@ Setting fan speed level: 2
 Checking device: /dev/ses0 (0,169)
 Found a SA120 at: /dev/ses0
 Checking device: /dev/ses1 (0,170)
-{"ses0": {"fan_0": 830, "fan_1": 944, "fan_2": 939, "fan_3": 0, "fan_4": 939, "fan_5": 954}}
+{"ses0": {"fan_0": 830, "fan_1": 944, "fan_2": 939, "fan_3": 928, "fan_4": 939, "fan_5": 954}}
 ~~~~
