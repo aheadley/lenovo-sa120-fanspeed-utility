@@ -87,12 +87,12 @@ def set_fan_speeds(device_path, speed):
 
     fan_data = sg_ses(device_path, '-p', '0x2', '--raw').stdout.split()
 
-    for fan_idx in range(0, MAX_FANS):
-        idx = 88 + 4 * fan_idx
-        fan_data[idx + 0] = b'80'
-        fan_data[idx + 1] = b'00'
-        fan_data[idx + 2] = b'00'
-        fan_data[idx + 3] = u'{:x}'.format(1 << 5 | speed & 7).encode('utf-8')
+    for fan_idx in range(MAX_FANS):
+        offset = 88 + (fan_idx * 4)
+        fan_data[offset + 0] = b'80'
+        fan_data[offset + 1] = b'00'
+        fan_data[offset + 2] = b'00'
+        fan_data[offset + 3] = u'{:x}'.format(1 << 5 | speed & 7).encode('utf-8')
 
     cmd_input = io.BytesIO()
     for offset in range(len(fan_data)):
@@ -104,8 +104,6 @@ def set_fan_speeds(device_path, speed):
         else:
             cmd_input.write(b' ')
     cmd_input.write(b'\n')
-
-    log.debug('cmd_input data: \n%s', cmd_input.getvalue().decode('utf-8'))
 
     proc = sg_ses(device_path, '-p', '0x2', '--control', '--data', '-',
         stdin=subprocess.PIPE)
