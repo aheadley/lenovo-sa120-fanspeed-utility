@@ -2,7 +2,6 @@
 # -*- coding: utf8 -*-
 
 import glob
-import io
 import itertools
 import logging
 import os
@@ -10,6 +9,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import tempfile
 
 log = logging.getLogger('fancontrol')
 log.addHandler(logging.StreamHandler(sys.stdout))
@@ -94,20 +94,19 @@ def set_fan_speeds(device_path, speed):
         fan_data[offset + 2] = b'00'
         fan_data[offset + 3] = u'{:x}'.format(1 << 5 | speed & 7).encode('utf-8')
 
-    cmd_input = io.BytesIO()
-    for offset in range(len(fan_data)):
-        cmd_input.write(fan_data[offset])
-        if (offset + 1) % 16 == 0:
-            cmd_input.write(b'\n')
-        elif (offset + 1) % 8 == 0:
-            cmd_input.write(b'  ')
-        else:
-            cmd_input.write(b' ')
-    cmd_input.write(b'\n')
+    with tempfile.NamedTemporaryFile('wb') as cmd_input:
+        for offset in range(len(fan_data)):
+            cmd_input.write(fan_data[offset])
+            if (offset + 1) % 16 == 0:
+                cmd_input.write(b'\n')
+            elif (offset + 1) % 8 == 0:
+                cmd_input.write(b'  ')
+            else:
+                cmd_input.write(b' ')
+        cmd_input.write(b'\n')
+        cmd_input.flush()
 
-    proc = sg_ses(device_path, '-p', '0x2', '--control', '--data', '-',
-        stdin=subprocess.PIPE)
-    out = proc.communicate(input=cmd_input.getvalue())[0].decode('utf-8')
+        out = sg_ses(device_path, '-p', '0x2', '--control', '--data', cmd_input.name).stdout.decode('utf-8')
     log.debug('Fan control cmd output: %s', out)
 
 def main(args):
