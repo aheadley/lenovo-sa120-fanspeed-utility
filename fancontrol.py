@@ -4,7 +4,9 @@
 import glob
 import itertools
 import logging
+import json
 import os
+import os.path
 import shlex
 import stat
 import subprocess
@@ -12,8 +14,8 @@ import sys
 import tempfile
 
 log = logging.getLogger('fancontrol')
-log.addHandler(logging.StreamHandler(sys.stdout))
-log.setLevel(logging.DEBUG)
+log.addHandler(logging.StreamHandler(sys.stderr))
+log.setLevel(logging.INFO)
 
 DEFAULT_DEVICE_PATTERNS = [
     '/dev/sg*',
@@ -106,21 +108,28 @@ def set_fan_speeds(device_path, speed):
         cmd_input.write(b'\n')
         cmd_input.flush()
 
-        out = sg_ses(device_path, '-p', '0x2', '--control', '--data', cmd_input.name).stdout.decode('utf-8')
+        out = sg_ses(device_path, '-p', '0x2', '--control', '--data=@{}'.format(cmd_input.name)).stdout.decode('utf-8')
     log.debug('Fan control cmd output: %s', out)
+
+def get_json_output(devices):
+    return json.dumps({
+        os.path.basename(dev_path): {'fan_{:d}'.format(i):
+                speed for i, speed in enumerate(get_fan_speeds(dev_path))}
+            for dev_path in devices})
 
 def main(args):
     dev_patterns = DEFAULT_DEVICE_PATTERNS + args.devices
 
-    for dev_path in get_sa120_devices(dev_patterns):
-        for fan_idx, fan_speed in enumerate(get_fan_speeds(dev_path)):
-            log.info('Fan #%d: %d RPM', fan_idx, fan_speed)
-
-        if args.set_speed:
-            log.info('Setting fan speed level: %d', args.set_speed)
-            set_fan_speeds(dev_path, args.set_speed)
+    if args.json:
+        sys.stdout.write(get_json_output(get_sa120_devices(dev_patterns)) + '\n')
     else:
-        log.warning('No enclosures found!')
+        for dev_path in get_sa120_devices(dev_patterns):
+            for fan_idx, fan_speed in enumerate(get_fan_speeds(dev_path)):
+                log.info('Fan #%d: %d RPM', fan_idx, fan_speed)
+
+            if args.set_speed:
+                log.info('Setting fan speed level: %d', args.set_speed)
+                set_fan_speeds(dev_path, args.set_speed)
 
 if __name__ == '__main__':
     import argparse
@@ -142,6 +151,10 @@ if __name__ == '__main__':
     parser.add_argument('-q', '--quiet',
         help='Log fewer messages',
         action='count', default=0,
+    )
+    parser.add_argument('-j', '--json',
+        help='Write fan speeds as json to stdout',
+        action='store_true', default=False,
     )
     args = parser.parse_args()
 
